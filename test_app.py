@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import os
 os.environ["GROQ_API_KEY"] = "mock_groq_key"
 os.environ["GOOGLE_API_KEY"] = "mock_google_key"
+os.environ["SQLITE_DB_PATH"] = "test_state.db"
 
 # Define mock ChromaVectorRepository to avoid initializing chromadb
 # and downloading default sentence-transformer embedding models.

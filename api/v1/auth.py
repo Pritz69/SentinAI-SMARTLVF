@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field, field_validator
-from typing import Literal
+from typing import Literal, List
 
 from database.sqlite_user_repo import user_repo
 from core.auth import (
     verify_password, 
     create_access_token, 
     get_current_user, 
+    require_admin,
     UserSession
 )
 
@@ -102,3 +103,45 @@ async def get_my_profile(current_user: UserSession = Depends(get_current_user)):
         username=current_user.username,
         role=current_user.role
     )
+
+@router.get("/users", response_model=List[UserProfileSchema])
+async def list_registered_users(current_user: UserSession = Depends(require_admin)):
+    """List all registered users in the database (Requires Admin)."""
+    users = user_repo.list_users()
+    return [UserProfileSchema(id=u["id"], username=u["username"], role=u["role"]) for u in users]
+
+@router.delete("/users/{username}")
+async def delete_registered_user(username: str, current_user: UserSession = Depends(get_current_user)):
+    """Delete a user account by username (Requires Admin or Self-Deletion)."""
+    target_username = username.lower()
+    
+    # Check permissions: Admin can delete anyone, normal user can only delete themselves
+    if current_user.role != "admin" and current_user.username.lower() != target_username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this user."
+        )
+        
+    # Prevent deleting the admin user
+    if target_username == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete the default admin user."
+        )
+        
+    # Check if user exists
+    user = user_repo.get_user(target_username)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found."
+        )
+        
+    success = user_repo.delete_user(target_username)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user."
+        )
+        
+    return {"message": f"User '{username}' successfully deleted."}

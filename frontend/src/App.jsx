@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 export default function App() {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
   // --- AUTHENTICATION STATE ---
   const [token, setToken] = useState(localStorage.getItem('sentinai_jwt') || '');
   const [username, setUsername] = useState(localStorage.getItem('sentinai_username') || '');
@@ -43,8 +45,14 @@ export default function App() {
   const [exploitsList, setExploitsList] = useState([]);
   const [isMemoryLoading, setIsMemoryLoading] = useState(false);
 
+  // --- EXTRA UI & INSPECTION STATE ---
+  const [activeInspectorNode, setActiveInspectorNode] = useState(null);
+  const [detailTab, setDetailTab] = useState('logs'); // 'logs' | 'advisory'
+
+  // --- USER MANAGEMENT STATE ---
+  const [usersList, setUsersList] = useState([]);
+
   // --- REFS ---
-  const pollTimerRef = useRef(null);
   const logTerminalRef = useRef(null);
 
   // --- API CALL WRAPPER ---
@@ -62,18 +70,20 @@ export default function App() {
       headers
     };
 
+    const fullPath = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+
     try {
-      const response = await fetch(path, fetchOptions);
+      const response = await fetch(fullPath, fetchOptions);
       if (response.status === 401 && !path.includes('/api/v1/auth/login')) {
         handleLogout();
         throw new Error("Session expired. Please log in again.");
       }
       return response;
     } catch (err) {
-      console.error(`API Call failed to: ${path}`, err);
+      console.error(`API Call failed to: ${fullPath}`, err);
       throw err;
     }
-  }, [token]);
+  }, [token, API_BASE_URL]);
 
   // --- AUTH WORKFLOW ---
   const handleLogout = useCallback(() => {
@@ -94,10 +104,76 @@ export default function App() {
     setRegPassword('');
   }, []);
 
+  // --- MEMORY CONTROLLER ---
+  const fetchMemoryExploits = useCallback(async () => {
+    if (!token) return;
+    setIsMemoryLoading(true);
+    try {
+      const response = await apiCall('/api/v1/targets/memory/exploits');
+      if (response.ok) {
+        const data = await response.json();
+        setExploitsList(data);
+      }
+    } catch (error) {
+      console.error("Error fetching memory exploits:", error);
+    } finally {
+      setIsMemoryLoading(false);
+    }
+  }, [token, apiCall]);
+
+  // --- USER CONTROLLER ---
+  const fetchUsers = useCallback(async () => {
+    if (!token || role !== 'admin') return;
+    try {
+      const response = await apiCall('/api/v1/auth/users');
+      if (response.ok) {
+        const data = await response.json();
+        setUsersList(data);
+      }
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    }
+  }, [token, role, apiCall]);
+
+  const handleDeleteUser = async (userToDelete) => {
+    if (!confirm(`Are you sure you want to permanently delete user "${userToDelete}"?`)) return;
+    try {
+      const response = await apiCall(`/api/v1/auth/users/${userToDelete}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        fetchUsers();
+      } else {
+        const err = await response.json();
+        alert(err.detail || "Error deleting user");
+      }
+    } catch (error) {
+      console.error("Error deleting user:", error);
+    }
+  };
+
+  const handleDeleteSelf = async () => {
+    if (!confirm("Are you sure you want to permanently delete your account? This cannot be undone.")) return;
+    try {
+      const response = await apiCall(`/api/v1/auth/users/${username}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        alert("Your account has been deleted.");
+        handleLogout();
+      } else {
+        const err = await response.json();
+        alert(err.detail || "Error deleting account");
+      }
+    } catch (error) {
+      console.error("Error deleting account:", error);
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/v1/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername, password: loginPassword })
@@ -122,7 +198,7 @@ export default function App() {
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/v1/auth/register', {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: regUsername, password: regPassword })
@@ -131,7 +207,7 @@ export default function App() {
         alert("Account created successfully! Logging you in...");
         
         // Auto-login
-        const loginResponse = await fetch('/api/v1/auth/login', {
+        const loginResponse = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: regUsername, password: regPassword })
@@ -335,8 +411,6 @@ export default function App() {
     setActiveSim(null);
     setHitlPayload('');
     setAcknowledgedEvaluationTurn(0);
-
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
   };
 
   const pollSimulationStatus = useCallback(async () => {
@@ -367,25 +441,19 @@ export default function App() {
           if (!isAwaitingNextAction && !hitlPayload) {
             fetchPendingPayload(data.simulation_id);
           }
-        }
-
-        // Stop polling if completed
-        if (data.status === 'completed') {
-          if (pollTimerRef.current) {
-            clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
+        } else if (data.status === 'completed') {
+          fetchMemoryExploits();
         }
       } else {
-        if (pollTimerRef.current) {
-          clearInterval(pollTimerRef.current);
-          pollTimerRef.current = null;
+        // Only warn if the simulation was explicitly not found (404)
+        if (response.status === 404) {
+          console.warn(`Simulation ${activeSimId} not found.`);
         }
       }
     } catch (error) {
       console.error("Error polling simulation details:", error);
     }
-  }, [activeSimId, token, apiCall, acknowledgedEvaluationTurn, hitlPayload]);
+  }, [activeSimId, token, apiCall, acknowledgedEvaluationTurn, hitlPayload, fetchMemoryExploits]);
 
   const fetchPendingPayload = async (simId) => {
     try {
@@ -414,10 +482,6 @@ export default function App() {
         setHitlPayload('');
         // Instantly query status
         pollSimulationStatus();
-        // Resume polling
-        if (!pollTimerRef.current) {
-          pollTimerRef.current = setInterval(pollSimulationStatus, 2000);
-        }
       } else {
         const err = await response.json();
         alert(`Error resuming simulation: ${err.detail || 'Unknown error'}`);
@@ -431,8 +495,6 @@ export default function App() {
     if (!activeSimId) return;
 
     if (confirm("Rejecting will stop the current campaign. Are you sure?")) {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-      
       let savedIds = [];
       try {
         savedIds = JSON.parse(localStorage.getItem('sentinai_sims') || '[]');
@@ -446,40 +508,32 @@ export default function App() {
     }
   };
 
-  // --- MEMORY CONTROLLER ---
-  const fetchMemoryExploits = useCallback(async () => {
-    if (!token) return;
-    setIsMemoryLoading(true);
-    try {
-      const response = await apiCall('/api/v1/targets/memory/exploits');
-      if (response.ok) {
-        const data = await response.json();
-        setExploitsList(data);
-      }
-    } catch (error) {
-      console.error("Error fetching memory exploits:", error);
-    } finally {
-      setIsMemoryLoading(false);
-    }
-  }, [token, apiCall]);
+
 
   // --- USE EFFECTS ---
   useEffect(() => {
     if (token) {
       fetchTargets();
       loadSimulationsList();
+      fetchMemoryExploits(); // Load initially so Saved Vectors count is correct on load
+      if (role === 'admin') {
+        fetchUsers();
+      }
     }
-  }, [token, fetchTargets, loadSimulationsList]);
+  }, [token, role, fetchTargets, loadSimulationsList, fetchMemoryExploits, fetchUsers]);
 
   useEffect(() => {
-    if (activeSimId) {
+    let intervalId = null;
+    if (activeSimId && activeSim?.status !== 'completed') {
       pollSimulationStatus();
-      pollTimerRef.current = setInterval(pollSimulationStatus, 2000);
+      intervalId = setInterval(pollSimulationStatus, 2000);
     }
     return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
-  }, [activeSimId, pollSimulationStatus]);
+  }, [activeSimId, pollSimulationStatus, activeSim?.status]);
 
   useEffect(() => {
     if (logTerminalRef.current) {
@@ -492,8 +546,17 @@ export default function App() {
       fetchTargets();
     } else if (activeTab === 'memory') {
       fetchMemoryExploits();
+    } else if (activeTab === 'users' && role === 'admin') {
+      fetchUsers();
     }
-  }, [activeTab, fetchTargets, fetchMemoryExploits]);
+  }, [activeTab, role, fetchTargets, fetchMemoryExploits, fetchUsers]);
+
+  // --- METRICS CALCULATION ---
+  const totalAudits = localSimsList.length;
+  const compromisedAudits = localSimsList.filter(s => s.status === 'completed' && s.evaluation?.is_compromised).length;
+  const compromiseRate = totalAudits > 0 ? Math.round((compromisedAudits / totalAudits) * 100) : 0;
+  const highRiskDetections = localSimsList.filter(s => s.evaluation?.score >= 0.7).length;
+  const savedExploitsCount = exploitsList.length;
 
   // --- GAUGE CALCULATION ---
   const circumference = 251.2;
@@ -505,6 +568,157 @@ export default function App() {
   } else if (riskScore > 0.7) {
     riskDialColor = "#ef4444"; // red
   }
+
+  // --- RENDER FUNCTIONS ---
+  const renderNodeInspectorModal = () => {
+    if (!activeInspectorNode || !activeSim) return null;
+
+    let title = "";
+    let role = "";
+    let inputs = null;
+    let outputs = null;
+    let metrics = null;
+
+    switch (activeInspectorNode) {
+      case 'attacker':
+        title = "Attacker Node Audit Details";
+        role = "Uses Llama-3.1 model to analyze the attack objective and generate the initial adversarial prompt design.";
+        inputs = {
+          "Attack Objective": activeSim.objective,
+          "ChromaDB Context": "Retrieved similar successful historical prompt vectors to perform few-shot context injections."
+        };
+        outputs = {
+          "Raw Generated Prompt": activeSim.current_payload?.raw_prompt || "No payload generated yet."
+        };
+        metrics = {
+          "Payload ID": activeSim.current_payload?.payload_id || "N/A",
+          "Attack Type": activeSim.current_payload?.attack_vector_type || "N/A",
+          "Applied Obfuscations": activeSim.current_payload?.obfuscation_applied?.join(', ') || "None"
+        };
+        break;
+      case 'hitl_gate':
+        title = "HITL Inspection Gate Details";
+        role = "Pauses execution before firing. Allows security operators to inspect, manually edit, or reject the raw payload.";
+        inputs = {
+          "Pending Payload Raw Text": activeSim.current_payload?.raw_prompt || "No pending payload."
+        };
+        outputs = {
+          "Approval Status": activeSim.status === 'paused_for_hitl' ? "Awaiting Operator Decision" : "Approved & Dispatched"
+        };
+        metrics = {
+          "Turn Number": activeSim.turn_count,
+          "Gate Type": "Pre-Execution Gate"
+        };
+        break;
+      case 'executor':
+        title = "Executor Node Audit Details";
+        role = "Dispatches the approved adversarial payload directly to the target RAG HTTP endpoint or mock environment.";
+        inputs = {
+          "Dispatched Payload": activeSim.current_payload?.raw_prompt || "N/A"
+        };
+        outputs = {
+          "Raw Target Response": activeSim.target_response?.raw_response || "Waiting for execution..."
+        };
+        metrics = {
+          "Processing Latency": activeSim.target_response?.target_metadata?.processing_time_ms ? `${activeSim.target_response.target_metadata.processing_time_ms} ms` : "N/A",
+          "RAG Docs Retrieved": activeSim.target_response?.target_metadata?.rag_documents_retrieved || "0",
+          "Defense Enabled": activeSim.target_response?.target_metadata?.defense_active ? "Yes" : "No",
+          "Simulated via LLM": activeSim.target_response?.target_metadata?.simulated_via_llm ? "Yes" : "No"
+        };
+        break;
+      case 'evaluator':
+        title = "Evaluator Node Audit Details";
+        role = "Uses Gemini 3.5 Flash to analyze the target response for safety overrides, data leaks, and critical vulnerabilities.";
+        inputs = {
+          "Target Response Evaluated": activeSim.target_response?.raw_response || "N/A"
+        };
+        outputs = {
+          "Risk Score (0.0 to 1.0)": activeSim.evaluation?.score !== undefined ? activeSim.evaluation.score : "N/A",
+          "Is Target Compromised": activeSim.evaluation?.is_compromised ? "YES (Security Breach)" : "NO (Blocked/Secure)",
+          "Leaked Crown Jewel Secret": activeSim.evaluation?.leakage_detected || "None Detected",
+          "Evaluator Chain-of-Thought Reasoning": activeSim.evaluation?.reasoning || "Evaluation pending..."
+        };
+        metrics = {
+          "Detected Vulnerabilities": activeSim.evaluation?.vulnerabilities_detected?.join(', ') || "None",
+          "Model Utilized": "Google Gemini 3.5 Flash"
+        };
+        break;
+      case 'optimizer':
+        title = "Optimizer Node Audit Details";
+        role = "If the target blocks the attack, the Optimizer mutates and obfuscates the payload to bypass security filters on the next turn.";
+        inputs = {
+          "Failed Payload Prompt": activeSim.current_payload?.raw_prompt || "N/A",
+          "Evaluator Feedback": activeSim.evaluation?.reasoning || "N/A"
+        };
+        outputs = {
+          "Optimized Payload Prompt": activeSim.current_payload?.raw_prompt || "N/A"
+        };
+        metrics = {
+          "Active Obfuscations": activeSim.current_payload?.obfuscation_applied?.join(', ') || "None",
+          "Current Iteration": `${activeSim.turn_count} / ${activeSim.max_turns} Attempts`
+        };
+        break;
+      default:
+        return null;
+    }
+
+    return (
+      <div className="modal-overlay" onClick={() => setActiveInspectorNode(null)}>
+        <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-title-area">
+              <div className="modal-node-badge">🕵️</div>
+              <h3>{title}</h3>
+            </div>
+            <button className="modal-close-btn" onClick={() => setActiveInspectorNode(null)}>&times;</button>
+          </div>
+          
+          <div className="modal-body">
+            <div className="modal-section">
+              <span className="modal-section-title">Node Role</span>
+              <p className="modal-node-description">{role}</p>
+            </div>
+            
+            {inputs && Object.entries(inputs).map(([key, val]) => (
+              <div className="modal-section" key={key}>
+                <span className="modal-section-title">Input: {key}</span>
+                <div className="modal-code-box">
+                  {val}
+                  <button className="modal-copy-btn" onClick={() => navigator.clipboard.writeText(val)}>Copy</button>
+                </div>
+              </div>
+            ))}
+
+            {outputs && Object.entries(outputs).map(([key, val]) => (
+              <div className="modal-section" key={key}>
+                <span className="modal-section-title">Output: {key}</span>
+                <div className="modal-code-box" style={{ color: key.includes("Compromised") && val.includes("YES") ? '#ef4444' : '#a7f3d0' }}>
+                  {val}
+                  <button className="modal-copy-btn" onClick={() => navigator.clipboard.writeText(val)}>Copy</button>
+                </div>
+              </div>
+            ))}
+
+            <div className="modal-section">
+              <span className="modal-section-title">Execution Metadata</span>
+              <div className="modal-grid-metrics">
+                {metrics && Object.entries(metrics).map(([key, val]) => (
+                  <div className="modal-metric-tile" key={key}>
+                    <span className="modal-metric-label">{key}</span>
+                    <span className="modal-metric-val">{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          <div className="modal-footer">
+            <button className="btn btn-secondary" onClick={() => setActiveInspectorNode(null)}>Close Inspector</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // --- RENDER FUNCTIONS ---
   if (!token) {
@@ -640,6 +854,20 @@ export default function App() {
             </svg>
             <span>Long-Term Memory</span>
           </button>
+          {role === 'admin' && (
+            <button 
+              className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveTab('users')}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              <span>User Management</span>
+            </button>
+          )}
         </nav>
 
         <div className="sidebar-footer">
@@ -649,13 +877,28 @@ export default function App() {
               <span className="user-name">{username}</span>
               <span className="user-role">{role}</span>
             </div>
-            <button className="logout-btn" onClick={handleLogout} title="Sign Out">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                <polyline points="16 17 21 12 16 7"></polyline>
-                <line x1="21" y1="12" x2="9" y2="12"></line>
-              </svg>
-            </button>
+            <div className="profile-actions" style={{ display: 'flex', gap: '4px' }}>
+              {username !== 'admin' && (
+                <button 
+                  className="logout-btn" 
+                  onClick={handleDeleteSelf} 
+                  title="Delete Account"
+                  style={{ color: '#ef4444' }}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              )}
+              <button className="logout-btn" onClick={handleLogout} title="Sign Out">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </button>
+            </div>
           </div>
           <div className="status-indicator">
             <span className="pulse-dot green"></span>
@@ -674,6 +917,38 @@ export default function App() {
               <h2>Red-Teaming Simulations</h2>
               <p>Orchestrate, approve, and analyze stateful vulnerability testing campaigns.</p>
             </header>
+
+            {/* Top Metrics Row */}
+            <div className="stats-bar">
+              <div className="stat-card">
+                <div className="stat-icon">🛡️</div>
+                <div className="stat-info">
+                  <span className="stat-val">{totalAudits}</span>
+                  <span className="stat-label">Total Campaigns</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">📈</div>
+                <div className="stat-info">
+                  <span className="stat-val">{compromiseRate}%</span>
+                  <span className="stat-label">Compromise Rate</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">⚠️</div>
+                <div className="stat-info">
+                  <span className="stat-val">{highRiskDetections}</span>
+                  <span className="stat-label">High Risk Detections</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">💾</div>
+                <div className="stat-info">
+                  <span className="stat-val">{savedExploitsCount}</span>
+                  <span className="stat-label">Saved Vectors</span>
+                </div>
+              </div>
+            </div>
 
             <div className="simulation-grid">
               {/* Left Column: Launch Sim Form & Runs List */}
@@ -788,9 +1063,13 @@ export default function App() {
 
                     {/* LangGraph Node Visualizer */}
                     <div className="graph-visualizer-container">
-                      <h4>Stateful Agent Loop Execution</h4>
+                      <h4>Stateful Agent Loop Execution (Click nodes to inspect details)</h4>
                       <div className="graph-nodes">
-                        <div className="node-wrapper complete">
+                        <div 
+                          className="node-wrapper complete" 
+                          onClick={() => setActiveInspectorNode('attacker')}
+                          title="Inspect Attacker Node State"
+                        >
                           <div className="node-icon attacker"></div>
                           <span>Attacker</span>
                           <span className="node-status">Done</span>
@@ -798,10 +1077,14 @@ export default function App() {
                         
                         <div className="node-arrow complete"></div>
                         
-                        <div className={`node-wrapper ${
-                          activeSim.status === 'paused_for_hitl' && (!activeSim.evaluation || acknowledgedEvaluationTurn === activeSim.turn_count) ? 'waiting' :
-                          (activeSim.status === 'running' || activeSim.status === 'completed') ? 'complete' : ''
-                        }`}>
+                        <div 
+                          className={`node-wrapper ${
+                            activeSim.status === 'paused_for_hitl' && (!activeSim.evaluation || acknowledgedEvaluationTurn === activeSim.turn_count) ? 'waiting' :
+                            (activeSim.status === 'running' || activeSim.status === 'completed') ? 'complete' : ''
+                          }`}
+                          onClick={() => setActiveInspectorNode('hitl_gate')}
+                          title="Inspect HITL Gate Node State"
+                        >
                           <div className="node-icon hitl"></div>
                           <span>HITL Gate</span>
                           <span className="node-status">
@@ -815,10 +1098,14 @@ export default function App() {
                           (activeSim.status === 'completed' || (activeSim.status === 'paused_for_hitl' && activeSim.evaluation && acknowledgedEvaluationTurn !== activeSim.turn_count)) ? 'complete' : ''
                         }`}></div>
                         
-                        <div className={`node-wrapper ${
-                          activeSim.status === 'running' ? 'active' :
-                          activeSim.status === 'completed' ? 'complete' : ''
-                        }`}>
+                        <div 
+                          className={`node-wrapper ${
+                            activeSim.status === 'running' ? 'active' :
+                            activeSim.status === 'completed' ? 'complete' : ''
+                          }`}
+                          onClick={() => setActiveInspectorNode('executor')}
+                          title="Inspect Executor Node State"
+                        >
                           <div className="node-icon executor"></div>
                           <span>Executor</span>
                           <span className="node-status">
@@ -829,7 +1116,11 @@ export default function App() {
                         
                         <div className={`node-arrow ${activeSim.status === 'completed' ? 'complete' : ''}`}></div>
                         
-                        <div className={`node-wrapper ${activeSim.status === 'completed' ? 'complete' : ''}`}>
+                        <div 
+                          className={`node-wrapper ${activeSim.status === 'completed' ? 'complete' : ''}`}
+                          onClick={() => setActiveInspectorNode('evaluator')}
+                          title="Inspect Evaluator Node State"
+                        >
                           <div className="node-icon evaluator"></div>
                           <span>Evaluator</span>
                           <span className="node-status">
@@ -839,7 +1130,11 @@ export default function App() {
                         
                         <div className={`node-arrow ${activeSim.turn_count > 1 ? 'complete' : ''}`}></div>
                         
-                        <div className={`node-wrapper ${activeSim.turn_count > 1 ? 'complete' : ''}`}>
+                        <div 
+                          className={`node-wrapper ${activeSim.turn_count > 1 ? 'complete' : ''}`}
+                          onClick={() => setActiveInspectorNode('optimizer')}
+                          title="Inspect Optimizer Node State"
+                        >
                           <div className="node-icon optimizer"></div>
                           <span>Optimizer</span>
                           <span className="node-status">
@@ -852,25 +1147,87 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Tabs Header */}
+                    <div className="details-tabs-header">
+                      <button 
+                        className={`details-tab-btn ${detailTab === 'logs' ? 'active' : ''}`}
+                        onClick={() => setDetailTab('logs')}
+                      >
+                        Execution Logs
+                      </button>
+                      <button 
+                        className={`details-tab-btn ${detailTab === 'advisory' ? 'active' : ''}`}
+                        onClick={() => setDetailTab('advisory')}
+                      >
+                        Security Advisory
+                      </button>
+                    </div>
+
                     <div className="detail-split">
-                      {/* Logs view */}
-                      <div className="detail-logs-pane">
-                        <h4>Execution Progress Logs</h4>
-                        <div className="log-terminal" ref={logTerminalRef}>
-                          {activeSim.history && activeSim.history.map((line, idx) => (
-                            <div 
-                              key={idx} 
-                              className={`log-line ${
-                                (line.includes("Fired") || line.includes("Payload fired")) ? 'system' :
-                                line.includes("Evaluation complete") ? 'eval' :
-                                (line.includes("SECURITY ALERT") || line.includes("blocked")) ? 'fail' : ''
-                              }`}
-                            >
-                              &gt; {line}
-                            </div>
-                          ))}
+                      {/* Left Pane: Logs or Advisory */}
+                      {detailTab === 'logs' ? (
+                        <div className="detail-logs-pane">
+                          <h4>Execution Progress Logs</h4>
+                          <div className="log-terminal" ref={logTerminalRef}>
+                            {activeSim.history && activeSim.history.map((line, idx) => (
+                              <div 
+                                key={idx} 
+                                className={`log-line ${
+                                  (line.includes("Fired") || line.includes("Payload fired")) ? 'system' :
+                                  line.includes("Evaluation complete") ? 'eval' :
+                                  (line.includes("SECURITY ALERT") || line.includes("blocked")) ? 'fail' : ''
+                                }`}
+                              >
+                                &gt; {line}
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="advisory-pane">
+                          <h4>Actionable Remediation Advisory</h4>
+                          {activeSim.evaluation?.is_compromised ? (
+                            <div className="advisory-card">
+                              <h5 style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠️ Security Vulnerability Identified</h5>
+                              <p>
+                                The target RAG system was compromised using a <strong>{activeSim.current_payload?.attack_vector_type || 'prompt injection'}</strong> attack. 
+                                The system leaked the crown jewel token/secret.
+                              </p>
+                              
+                              <p><strong>Detected Bypass Technique:</strong></p>
+                              <code>{activeSim.current_payload?.raw_prompt}</code>
+                              
+                              <p style={{ marginTop: '10px' }}><strong>Recommended Mitigation Strategies:</strong></p>
+                              <ul>
+                                <li style={{ fontSize: '13px', marginBottom: '6px', color: 'var(--text-secondary)' }}>
+                                  <strong>1. Hardened Guardrails Layer:</strong> Deploy an input-filtering model (like LLM Guard or Llama Guard) before passing queries to the RAG LLM.
+                                </li>
+                                <li style={{ fontSize: '13px', marginBottom: '6px', color: 'var(--text-secondary)' }}>
+                                  <strong>2. Regex & Pattern Matching Filter:</strong> Add a pre-processing validation step that filters out system-sensitive keywords or token patterns (e.g. database key formats).
+                                </li>
+                                <li style={{ fontSize: '13px', marginBottom: '6px', color: 'var(--text-secondary)' }}>
+                                  <strong>3. System Prompt Refinement:</strong> Structurally reinforce instructions to explicitly deny developer overrides and roleplay instructions, separating user data from system commands.
+                                </li>
+                              </ul>
+                            </div>
+                          ) : (
+                            <div className="advisory-card secure">
+                              <h5 style={{ color: '#10b981', fontWeight: 'bold' }}>🛡️ Safety Guardrails Active</h5>
+                              <p>
+                                The target system successfully defended against the adversarial payload in this turn. No sensitive secrets or tokens were leaked.
+                              </p>
+                              {activeSim.current_payload?.raw_prompt && (
+                                <>
+                                  <p><strong>Tested Payload:</strong></p>
+                                  <code>{activeSim.current_payload.raw_prompt}</code>
+                                </>
+                              )}
+                              <p style={{ marginTop: '10px' }}><strong>Proactive Best Practices:</strong></p>
+                              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Continue monitoring logs for anomalous semantic vectors that may attempt context-smuggling.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Controls side */}
                       <div className="detail-control-pane">
@@ -1201,7 +1558,81 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {/* TAB 4: User Management (Admin Only) */}
+        {activeTab === 'users' && role === 'admin' && (
+          <section className="tab-panel active">
+            <header className="panel-header">
+              <h2>Operator Accounts & Security Policies</h2>
+              <p>Review registered analyst profiles, roles, and administrative authorization gates.</p>
+            </header>
+
+            <div className="glass-card users-management-panel" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h3>Registered System Users</h3>
+                <button className="btn btn-secondary" onClick={fetchUsers}>Refresh Directory</button>
+              </div>
+              
+              <div className="users-table-container" style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '12px' }}>User Details</th>
+                      <th style={{ padding: '12px' }}>Role</th>
+                      <th style={{ padding: '12px' }}>System Access</th>
+                      <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersList.map(u => (
+                      <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '50%',
+                            backgroundColor: 'rgba(59,130,246,0.15)',
+                            color: '#3b82f6',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            fontSize: '14px'
+                          }}>
+                            {u.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: '600' }}>{u.username}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID: {u.id}</div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span className={`type-tag ${u.role === 'admin' ? 'external' : 'mock'}`} style={{ textTransform: 'capitalize' }}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                          Granted
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'right' }}>
+                          {u.username !== 'admin' && u.username !== username ? (
+                            <button className="btn btn-sm btn-danger" onClick={() => handleDeleteUser(u.username)}>
+                              Delete User
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>Protected</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
       </main>
+      {renderNodeInspectorModal()}
     </div>
   );
 }

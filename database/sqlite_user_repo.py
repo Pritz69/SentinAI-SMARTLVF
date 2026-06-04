@@ -107,5 +107,14 @@ class UserRepository:
         conn.close()
         return [dict(row) for row in rows]
 
+    def delete_user(self, username: str) -> bool:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+        changes = conn.total_changes
+        conn.commit()
+        conn.close()
+        return changes > 0
+
 # Global singleton instance
 user_repo = UserRepository(settings.SQLITE_DB_PATH)

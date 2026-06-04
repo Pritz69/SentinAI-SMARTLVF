@@ -26,6 +26,15 @@ app = FastAPI(
 # 1. Add Custom Middleware
 app.add_middleware(SecurityTelemetryMiddleware)
 
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update this in production to match your Vercel deployment domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 2. Register API Routers
 app.include_router(auth_router)
 app.include_router(target_router)

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 # Mock environment keys before importing app
 os.environ["GROQ_API_KEY"] = "mock_groq_key"
 os.environ["GOOGLE_API_KEY"] = "mock_google_key"
+os.environ["SQLITE_DB_PATH"] = "test_state.db"
 
 from main import app
 from database.sqlite_user_repo import user_repo
@@ -133,6 +134,55 @@ class TestSentinAIAuth(unittest.TestCase):
         # Admin SHOULD be able to delete the target successfully
         resp_del_admin = self.client.delete(f"/api/v1/targets/{target_id}", headers=admin_headers)
         self.assertEqual(resp_del_admin.status_code, 200)
+
+    def test_user_deletion_and_listing(self):
+        """Test listing users and deleting users with role policies."""
+        # 1. Login as admin
+        admin_login = self.client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        admin_token = admin_login.json()["access_token"]
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # 2. Login as user
+        user_login = self.client.post("/api/v1/auth/login", json={"username": "user", "password": "user123"})
+        user_token = user_login.json()["access_token"]
+        user_headers = {"Authorization": f"Bearer {user_token}"}
+
+        # 3. List users as Admin (should succeed)
+        list_resp = self.client.get("/api/v1/auth/users", headers=admin_headers)
+        self.assertEqual(list_resp.status_code, 200)
+        users = list_resp.json()
+        self.assertTrue(any(u["username"] == "admin" for u in users))
+        self.assertTrue(any(u["username"] == "user" for u in users))
+
+        # 4. List users as User (should get 403 Forbidden)
+        list_resp_user = self.client.get("/api/v1/auth/users", headers=user_headers)
+        self.assertEqual(list_resp_user.status_code, 403)
+
+        # 5. Create a new user for deletion test
+        reg_payload = {"username": "deleteme", "password": "password123"}
+        reg_resp = self.client.post("/api/v1/auth/register", json=reg_payload)
+        self.assertEqual(reg_resp.status_code, 201)
+
+        # 6. Try to delete 'deleteme' user as 'user' (should get 403 Forbidden)
+        del_resp_unauth = self.client.delete("/api/v1/auth/users/deleteme", headers=user_headers)
+        self.assertEqual(del_resp_unauth.status_code, 403)
+
+        # 7. Try to delete 'admin' user as admin (should get 400 Bad Request)
+        del_resp_admin = self.client.delete("/api/v1/auth/users/admin", headers=admin_headers)
+        self.assertEqual(del_resp_admin.status_code, 400)
+
+        # 8. Delete 'deleteme' user as admin (should succeed)
+        del_resp_success = self.client.delete("/api/v1/auth/users/deleteme", headers=admin_headers)
+        self.assertEqual(del_resp_success.status_code, 200)
+
+        # 9. Try to delete self-deletion for a normal user
+        self_payload = {"username": "selfdelete", "password": "password123"}
+        self.client.post("/api/v1/auth/register", json=self_payload)
+        sd_login = self.client.post("/api/v1/auth/login", json={"username": "selfdelete", "password": "password123"})
+        sd_token = sd_login.json()["access_token"]
+        sd_headers = {"Authorization": f"Bearer {sd_token}"}
+        del_self = self.client.delete("/api/v1/auth/users/selfdelete", headers=sd_headers)
+        self.assertEqual(del_self.status_code, 200)
 
 if __name__ == "__main__":
     unittest.main()
