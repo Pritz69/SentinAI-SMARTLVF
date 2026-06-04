@@ -45,7 +45,21 @@ from core.mcp import MCPTargetResponse
 
 class TestSentinAISimulation(unittest.TestCase):
     def setUp(self):
+        from core.auth import get_current_user, require_admin, UserSession
+        app.dependency_overrides[get_current_user] = lambda: UserSession(
+            id="test_admin_id",
+            username="test_admin",
+            role="admin"
+        )
+        app.dependency_overrides[require_admin] = lambda: UserSession(
+            id="test_admin_id",
+            username="test_admin",
+            role="admin"
+        )
         self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
 
     @classmethod
     def tearDownClass(cls):

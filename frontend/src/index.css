@@ -1249,3 +1249,205 @@ input[type="range"] {
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
 }
+
+/* --- AUTHENTICATION STYLING --- */
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--bg-primary);
+    background-image:
+        radial-gradient(at 10% 10%, rgba(99, 102, 241, 0.2) 0px, transparent 50%),
+        radial-gradient(at 90% 90%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.login-glass-card {
+    background: var(--bg-glass);
+    border: 1px solid var(--border-glass);
+    border-radius: 20px;
+    padding: 35px 30px;
+    width: 420px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), var(--shadow-glow);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    display: flex;
+    flex-direction: column;
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.logo-icon-large {
+    font-size: 40px;
+    margin-bottom: 12px;
+    display: inline-block;
+    filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.4));
+}
+
+.login-header h2 {
+    font-family: var(--font-title);
+    font-size: 24px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.login-header p {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.login-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-glass);
+    margin-bottom: 25px;
+}
+
+.login-tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-bottom: 2px solid transparent;
+}
+
+.login-tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.login-tab-btn.active {
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--accent-color);
+}
+
+.login-form-panel {
+    display: none;
+    flex-direction: column;
+}
+
+.login-form-panel.active {
+    display: flex;
+}
+
+.btn-block {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.credentials-hint {
+    background-color: rgba(10, 10, 20, 0.6);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 20px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.credentials-hint code {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+/* User profile inside sidebar */
+.user-profile-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 8px;
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+    border-radius: 10px;
+    margin-bottom: 15px;
+}
+
+.user-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-neon), var(--accent-color));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-family: var(--font-title);
+    font-weight: 700;
+    font-size: 14px;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+
+.user-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.user-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role {
+    font-size: 9px;
+    text-transform: uppercase;
+    color: var(--accent-neon);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.logout-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+.logout-btn:hover {
+    color: var(--color-red);
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* User mode restriction styles */
+.disabled-overlay-msg {
+    color: var(--color-yellow);
+    font-size: 12px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background-color: rgba(245, 158, 11, 0.05);
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    text-align: center;
+}

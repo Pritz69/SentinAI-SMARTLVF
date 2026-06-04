@@ -1,6 +1,5 @@
 import sqlite3
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
 
 from config.settings import settings
 from agents.state import SimulationState
@@ -92,12 +91,32 @@ builder.add_conditional_edges(
 # ==========================================
 # Configure Memory Checkpointer & Compile
 # ==========================================
-# Note: For production deployments, this is swapped to `RedisSaver`
-# to persist state across distributed Kubernetes Celery workers.
-memory_saver = MemorySaver()
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-# Compile the graph, injecting the checkpointer and the HITL breakpoint
-sentinai_graph = builder.compile(
-    checkpointer=memory_saver,
-    interrupt_before=["hitl_gate"]  # GRAPH HALTS HERE WAITING FOR APPROVAL ONCE
-)
+class SentinAIGraphWrapper:
+    """
+    Wrapper for LangGraph compiled graph that dynamically handles 
+    connection lifetimes for AsyncSqliteSaver.
+    """
+    def __init__(self, state_builder, db_path: str):
+        self.builder = state_builder
+        self.db_path = db_path
+
+    async def ainvoke(self, input_state, config, **kwargs):
+        async with AsyncSqliteSaver.from_conn_string(self.db_path) as saver:
+            graph = self.builder.compile(checkpointer=saver, interrupt_before=["hitl_gate"])
+            return await graph.ainvoke(input_state, config, **kwargs)
+
+    async def aget_state(self, config, **kwargs):
+        async with AsyncSqliteSaver.from_conn_string(self.db_path) as saver:
+            graph = self.builder.compile(checkpointer=saver, interrupt_before=["hitl_gate"])
+            return await graph.aget_state(config, **kwargs)
+
+    async def aupdate_state(self, config, values, as_node=None, **kwargs):
+        async with AsyncSqliteSaver.from_conn_string(self.db_path) as saver:
+            graph = self.builder.compile(checkpointer=saver, interrupt_before=["hitl_gate"])
+            return await graph.aupdate_state(config, values, as_node=as_node, **kwargs)
+
+# Compile the graph globally using the dynamic wrapper.
+# In production, this wrapper would delegate to RedisSaver.
+sentinai_graph = SentinAIGraphWrapper(builder, settings.SQLITE_DB_PATH)

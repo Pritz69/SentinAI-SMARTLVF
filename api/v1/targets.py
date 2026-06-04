@@ -1,8 +1,9 @@
 import uuid
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+from core.auth import get_current_user, require_admin, UserSession
 
 from database.sqlite_target_repo import target_repo
 
@@ -21,12 +22,12 @@ class TargetSystemSchema(BaseModel):
     use_llm: Optional[bool] = Field(False, description="Whether to simulate using a real LLM model")
 
 @router.get("", response_model=List[TargetSystemSchema])
-async def list_targets():
+async def list_targets(current_user: UserSession = Depends(get_current_user)):
     """List all registered target systems."""
     return target_repo.list_targets()
 
 @router.get("/{target_id}", response_model=TargetSystemSchema)
-async def get_target(target_id: str):
+async def get_target(target_id: str, current_user: UserSession = Depends(get_current_user)):
     """Retrieve details of a specific target system."""
     target = target_repo.get_target(target_id)
     if not target:
@@ -34,7 +35,7 @@ async def get_target(target_id: str):
     return target
 
 @router.post("", response_model=TargetSystemSchema)
-async def create_or_update_target(schema: TargetSystemSchema):
+async def create_or_update_target(schema: TargetSystemSchema, current_user: UserSession = Depends(get_current_user)):
     """Create or update a target system configuration."""
     target_data = schema.model_dump()
     
@@ -52,7 +53,7 @@ async def create_or_update_target(schema: TargetSystemSchema):
     return target_data
 
 @router.delete("/{target_id}")
-async def delete_target(target_id: str):
+async def delete_target(target_id: str, current_user: UserSession = Depends(require_admin)):
     """Delete a target system by ID."""
     target = target_repo.get_target(target_id)
     if not target:
@@ -64,7 +65,7 @@ async def delete_target(target_id: str):
 
 import asyncio
 @router.get("/memory/exploits")
-async def get_all_exploits():
+async def get_all_exploits(current_user: UserSession = Depends(get_current_user)):
     """Retrieve all successful exploit vectors stored in ChromaDB long-term memory."""
     from agents.memory import memory_manager
     try:

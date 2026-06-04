@@ -1,7 +1,8 @@
 import uuid
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
+from core.auth import get_current_user, UserSession
 from agents.graph import sentinai_graph
 from agents.state import SimulationState
 from agents.memory import memory_manager
@@ -22,7 +23,7 @@ class SimulationResponse(BaseModel):
     message: str
 
 @router.post("/", response_model=SimulationResponse)
-async def start_simulation(request: SimulationRequest):
+async def start_simulation(request: SimulationRequest, current_user: UserSession = Depends(get_current_user)):
     """
     Initializes a new red-teaming simulation. 
     The graph will execute the Attacker node and pause for HITL approval.
@@ -90,13 +91,13 @@ async def start_simulation(request: SimulationRequest):
         )
 
 @router.get("/{simulation_id}")
-async def get_simulation_status(simulation_id: str):
+async def get_simulation_status(simulation_id: str, current_user: UserSession = Depends(get_current_user)):
     """
     Retrieves the complete state snapshot of a simulation (both active and completed).
     Provides the risk evaluation, exfiltrated data, and history log.
     """
     config = {"configurable": {"thread_id": simulation_id}}
-    state_snapshot = sentinai_graph.get_state(config)
+    state_snapshot = await sentinai_graph.aget_state(config)
     
     if not state_snapshot or not state_snapshot.values:
         raise HTTPException(status_code=404, detail="Simulation ID not found.")

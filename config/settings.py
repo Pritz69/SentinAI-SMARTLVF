@@ -28,4 +28,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_TOKENS: int = 100
     RATE_LIMIT_REFILL_RATE: float = 10.0  # Tokens per second
 
+    # JWT Authentication Parameters
+    JWT_SECRET_KEY: str = "sentinai-super-secret-development-key-1234"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
 settings = Settings()

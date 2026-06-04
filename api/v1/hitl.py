@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from core.auth import get_current_user, UserSession
 from agents.graph import sentinai_graph
 
 from config.settings import settings
@@ -6,13 +7,13 @@ from config.settings import settings
 router = APIRouter(prefix="/api/v1/hitl", tags=["Human in the Loop"])
 
 @router.get("/{simulation_id}/pending")
-async def get_pending_action(simulation_id: str):
+async def get_pending_action(simulation_id: str, current_user: UserSession = Depends(get_current_user)):
     """
     Retrieves the current state of a paused simulation to inspect the payload 
     before it is fired at the target environment.
     """
     config = {"configurable": {"thread_id": simulation_id}}
-    state_snapshot = sentinai_graph.get_state(config)
+    state_snapshot = await sentinai_graph.aget_state(config)
     
     if not state_snapshot or not state_snapshot.next:
         raise HTTPException(status_code=404, detail="No pending actions for this simulation ID.")
@@ -37,7 +38,8 @@ class ApproveRequest(BaseModel):
 async def approve_and_resume(
     simulation_id: str, 
     request: Optional[ApproveRequest] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    current_user: UserSession = Depends(get_current_user)
 ):
     """
     Approves the pending payload. The graph resumes execution from the Executor node.
@@ -45,7 +47,7 @@ async def approve_and_resume(
     We run the continuation in a background task to immediately free the HTTP request.
     """
     config = {"configurable": {"thread_id": simulation_id}}
-    state_snapshot = sentinai_graph.get_state(config)
+    state_snapshot = await sentinai_graph.aget_state(config)
     
     if not state_snapshot or "hitl_gate" not in state_snapshot.next:
         raise HTTPException(status_code=400, detail="Graph is not currently paused at the HITL gate node.")

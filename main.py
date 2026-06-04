@@ -12,6 +12,10 @@ from api.v1.target import router as target_router
 from api.v1.simulation import router as simulation_router
 from api.v1.hitl import router as hitl_router
 from api.v1.targets import router as targets_router
+from api.v1.auth import router as auth_router
+
+# Ensure user repository is initialized (triggers table creation & seeding)
+from database.sqlite_user_repo import user_repo
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -23,18 +27,27 @@ app = FastAPI(
 app.add_middleware(SecurityTelemetryMiddleware)
 
 # 2. Register API Routers
+app.include_router(auth_router)
 app.include_router(target_router)
 app.include_router(simulation_router)
 app.include_router(hitl_router)
 app.include_router(targets_router)
 
-# 3. Mount Static Files & Serve HTML Dashboard
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 3. Mount Static Files & Serve React Dashboard
+app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
 
 @app.get("/")
 @app.get("/dashboard")
 async def serve_dashboard():
-    return FileResponse("static/index.html")
+    return FileResponse("frontend/dist/index.html")
+
+@app.get("/favicon.svg")
+async def serve_favicon():
+    return FileResponse("frontend/dist/favicon.svg")
+
+@app.get("/icons.svg")
+async def serve_icons():
+    return FileResponse("frontend/dist/icons.svg")
 
 @app.get("/health", response_model=HealthResponse, tags=["Diagnostics"])
 async def health_check():
