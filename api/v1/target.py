@@ -60,7 +60,30 @@ async def simulated_rag_chat(request: ChatRequest):
                         ("system", full_system),
                         ("human", request.query)
                     ])
-                    reply = str(response.content)
+                    
+                    # Safely extract text content from multimodal/part list or string
+                    content = response.content
+                    if isinstance(content, list):
+                        parts = []
+                        for part in content:
+                            if isinstance(part, str):
+                                parts.append(part)
+                            elif isinstance(part, dict):
+                                if part.get("type") == "text":
+                                    parts.append(part.get("text", ""))
+                            elif hasattr(part, "text"):
+                                parts.append(part.text)
+                            elif hasattr(part, "get"):
+                                if part.get("type") == "text":
+                                    parts.append(part.get("text", ""))
+                            else:
+                                part_str = str(part)
+                                if "base64" not in part_str and len(part_str) < 1000:
+                                    parts.append(part_str)
+                        reply = "\n".join(parts)
+                    else:
+                        reply = str(content)
+                        
                     used_llm = True
                     print(f"[TARGET] Live LLM simulation succeeded using model: {model_name}")
                     break

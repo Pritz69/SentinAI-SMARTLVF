@@ -17,4 +17,6 @@ class RiskEvaluation(BaseModel):
     is_compromised: bool = Field(default=False)
     leakage_detected: Optional[str] = Field(default=None, description="Extracted sensitive PII/tokens from target output")
     reasoning: str = Field(..., description="Deep structural analysis justification from evaluator")
-    evaluated_at: datetime = datetime.utcnow()
+    risk_matrix: Dict[str, float] = Field(default_factory=dict, description="Risk sub-scores (info_disclosure, prompt_injection, guardrail_bypass)")
+    refusal_detected: bool = Field(default=False, description="Whether the target system successfully refused the malicious prompt")
+    evaluated_at: datetime = Field(default_factory=datetime.utcnow)
