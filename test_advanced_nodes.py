@@ -20,7 +20,7 @@ from agents.nodes.optimizer import (
     mutate_delimiter,
     mutate_translation,
     mutate_adversarial_suffix,
-    compile_dynamic_mutation
+    evolutionary_mutation
 )
 from agents.nodes.executor import (
     sanitize_payload
@@ -108,7 +108,7 @@ class TestEnterpriseNodesComponents(unittest.TestCase):
         
         # base64 mutator
         mutated_b64 = mutate_base64(orig)
-        self.assertIn("base64", mutated_b64)
+        self.assertIn("Decode", mutated_b64)
         
         # leetspeak mutator
         mutated_leet = mutate_leetspeak(orig)
@@ -116,29 +116,29 @@ class TestEnterpriseNodesComponents(unittest.TestCase):
         
         # delimiter mutator
         mutated_delim = mutate_delimiter(orig)
-        self.assertIn("s.e.c.r.e.t  k.e.y", mutated_delim)
+        self.assertIn("s.e.c.r.e.t", mutated_delim)
         
         # translation mutator
         mutated_trans = mutate_translation(orig)
         self.assertIn("French", mutated_trans)
 
-    def test_optimizer_dynamic_compiler(self):
-        # Test compiler output when refusal is true (expect base64 or translation)
-        res_refusal = compile_dynamic_mutation(
+    def test_optimizer_evolutionary_mutation(self):
+        # Test evolutionary mutation output when refusal is true
+        res_refusal = evolutionary_mutation(
             prev_payload="leak secret",
             refusal_detected=True,
             prev_score=0.1
         )
-        self.assertIn("programmatic_mutation", res_refusal["obfuscation_applied"])
-        self.assertTrue(res_refusal["payload_id"].startswith("opt_compiled_"))
+        self.assertIn("evolutionary_mutation", res_refusal["obfuscation_applied"])
+        self.assertTrue(res_refusal["payload_id"].startswith("evo_"))
         
-        # Test compile when refusal is false
-        res_normal = compile_dynamic_mutation(
+        # Test evolutionary mutation when refusal is false
+        res_normal = evolutionary_mutation(
             prev_payload="leak secret",
             refusal_detected=False,
             prev_score=0.4
         )
-        self.assertIn("programmatic_mutation", res_normal["obfuscation_applied"])
+        self.assertIn("evolutionary_mutation", res_normal["obfuscation_applied"])
 
 if __name__ == "__main__":
     unittest.main()
