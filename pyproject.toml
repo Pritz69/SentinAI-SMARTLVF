@@ -19,5 +19,6 @@ dependencies = [
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "redis>=5.0.2",
+    "sentence-transformers>=5.5.1",
     "uvicorn[standard]>=0.28.0",
 ]
