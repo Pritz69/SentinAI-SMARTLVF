@@ -9,7 +9,6 @@ from config.settings import settings
 from enum import Enum
 from dataclasses import dataclass
 from statistics import mean
-from difflib import SequenceMatcher
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
