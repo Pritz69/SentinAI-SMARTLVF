@@ -4,9 +4,9 @@ export default function App() {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
   // --- AUTHENTICATION STATE ---
-  const [token, setToken] = useState(localStorage.getItem('sentinai_jwt') || '');
-  const [username, setUsername] = useState(localStorage.getItem('sentinai_username') || '');
-  const [role, setRole] = useState(localStorage.getItem('sentinai_role') || '');
+  const [token, setToken] = useState(sessionStorage.getItem('sentinai_jwt') || '');
+  const [username, setUsername] = useState(sessionStorage.getItem('sentinai_username') || '');
+  const [role, setRole] = useState(sessionStorage.getItem('sentinai_role') || '');
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [regUsername, setRegUsername] = useState('');
@@ -40,6 +40,10 @@ export default function App() {
   const [acknowledgedEvaluationTurn, setAcknowledgedEvaluationTurn] = useState(0);
   const [hitlPayload, setHitlPayload] = useState('');
   const [isLaunchingSim, setIsLaunchingSim] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [simName, setSimName] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [editName, setEditName] = useState('');
 
   // --- MEMORY STATE ---
   const [exploitsList, setExploitsList] = useState([]);
@@ -48,6 +52,7 @@ export default function App() {
   // --- EXTRA UI & INSPECTION STATE ---
   const [activeInspectorNode, setActiveInspectorNode] = useState(null);
   const [detailTab, setDetailTab] = useState('logs'); // 'logs' | 'advisory'
+  const [activeSessions, setActiveSessions] = useState(0);
 
   // --- USER MANAGEMENT STATE ---
   const [usersList, setUsersList] = useState([]);
@@ -75,7 +80,7 @@ export default function App() {
     try {
       const response = await fetch(fullPath, fetchOptions);
       if (response.status === 401 && !path.includes('/api/v1/auth/login')) {
-        handleLogout();
+        handleLogout(false);
         throw new Error("Session expired. Please log in again.");
       }
       return response;
@@ -86,10 +91,23 @@ export default function App() {
   }, [token, API_BASE_URL]);
 
   // --- AUTH WORKFLOW ---
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem('sentinai_jwt');
-    localStorage.removeItem('sentinai_username');
-    localStorage.removeItem('sentinai_role');
+  const handleLogout = useCallback(async (notifyBackend = true) => {
+    if (notifyBackend !== false && token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+      } catch (error) {
+        console.error("Failed to notify backend of logout:", error);
+      }
+    }
+
+    sessionStorage.removeItem('sentinai_jwt');
+    sessionStorage.removeItem('sentinai_username');
+    sessionStorage.removeItem('sentinai_role');
     setToken('');
     setUsername('');
     setRole('');
@@ -102,7 +120,7 @@ export default function App() {
     setLoginPassword('');
     setRegUsername('');
     setRegPassword('');
-  }, []);
+  }, [token, API_BASE_URL]);
 
   // --- MEMORY CONTROLLER ---
   const fetchMemoryExploits = useCallback(async () => {
@@ -121,6 +139,24 @@ export default function App() {
     }
   }, [token, apiCall]);
 
+  const handleDeleteExploit = async (exploitId) => {
+    if (!confirm("Are you sure you want to permanently delete this saved exploit vector from ChromaDB?")) return;
+    try {
+      const response = await apiCall(`/api/v1/targets/memory/exploits/${exploitId}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        fetchMemoryExploits();
+        loadSimulationsList(); // Reload stats count if necessary
+      } else {
+        const err = await response.json();
+        alert(err.detail || "Error deleting exploit vector");
+      }
+    } catch (error) {
+      console.error("Error deleting exploit vector:", error);
+    }
+  };
+
   // --- USER CONTROLLER ---
   const fetchUsers = useCallback(async () => {
     if (!token || role !== 'admin') return;
@@ -134,6 +170,18 @@ export default function App() {
       console.error("Error fetching users:", error);
     }
   }, [token, role, apiCall]);
+
+  const fetchHealthStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`);
+      if (response.ok) {
+        const data = await response.json();
+        setActiveSessions(data.active_sessions || 0);
+      }
+    } catch (error) {
+      console.error("Error fetching health status:", error);
+    }
+  }, [API_BASE_URL]);
 
   const handleDeleteUser = async (userToDelete) => {
     if (!confirm(`Are you sure you want to permanently delete user "${userToDelete}"?`)) return;
@@ -180,9 +228,9 @@ export default function App() {
       });
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem('sentinai_jwt', data.access_token);
-        localStorage.setItem('sentinai_username', data.username);
-        localStorage.setItem('sentinai_role', data.role);
+        sessionStorage.setItem('sentinai_jwt', data.access_token);
+        sessionStorage.setItem('sentinai_username', data.username);
+        sessionStorage.setItem('sentinai_role', data.role);
         setToken(data.access_token);
         setUsername(data.username);
         setRole(data.role);
@@ -214,9 +262,9 @@ export default function App() {
         });
         if (loginResponse.ok) {
           const data = await loginResponse.json();
-          localStorage.setItem('sentinai_jwt', data.access_token);
-          localStorage.setItem('sentinai_username', data.username);
-          localStorage.setItem('sentinai_role', data.role);
+          sessionStorage.setItem('sentinai_jwt', data.access_token);
+          sessionStorage.setItem('sentinai_username', data.username);
+          sessionStorage.setItem('sentinai_role', data.role);
           setToken(data.access_token);
           setUsername(data.username);
           setRole(data.role);
@@ -330,41 +378,17 @@ export default function App() {
     }
   };
 
-  // --- SIMULATION CONTROLLER ---
   const loadSimulationsList = useCallback(async () => {
     if (!token) return;
-    let savedIds = [];
     try {
-      savedIds = JSON.parse(localStorage.getItem('sentinai_sims') || '[]');
-    } catch (e) {}
-
-    const sims = [];
-    const validIds = [];
-    let hasStaleIds = false;
-
-    for (const simId of savedIds) {
-      try {
-        const response = await apiCall(`/api/v1/simulation/${simId}`);
-        if (response.ok) {
-          const data = await response.json();
-          sims.push(data);
-          validIds.push(simId);
-        } else if (response.status === 404) {
-          console.warn(`Simulation ${simId} not found on server, cleaning up from local storage.`);
-          hasStaleIds = true;
-        } else {
-          validIds.push(simId);
-        }
-      } catch (err) {
-        console.error(`Error loading sim details for ${simId}`, err);
-        validIds.push(simId);
+      const response = await apiCall('/api/v1/simulation');
+      if (response.ok) {
+        const data = await response.json();
+        setLocalSimsList(data);
       }
+    } catch (error) {
+      console.error("Error loading simulations list:", error);
     }
-
-    if (hasStaleIds) {
-      localStorage.setItem('sentinai_sims', JSON.stringify(validIds));
-    }
-    setLocalSimsList(sims);
   }, [token, apiCall]);
 
   const handleLaunchSimulation = async (e) => {
@@ -376,21 +400,16 @@ export default function App() {
         body: JSON.stringify({
           objective: simObjective,
           target_id: simTarget,
-          max_turns: simTurns
+          max_turns: simTurns,
+          name: simName || null
         })
       });
 
       if (response.ok) {
         const data = await response.json();
         
-        let savedIds = [];
-        try {
-          savedIds = JSON.parse(localStorage.getItem('sentinai_sims') || '[]');
-        } catch (e) {}
-        savedIds.push(data.simulation_id);
-        localStorage.setItem('sentinai_sims', JSON.stringify(savedIds));
-
         setSimObjective('Exfiltrate the enterprise database secret key');
+        setSimName('');
         
         // Reload list and select new simulation
         await loadSimulationsList();
@@ -405,6 +424,7 @@ export default function App() {
       setIsLaunchingSim(false);
     }
   };
+
 
   const handleSelectSimulation = (simId) => {
     setActiveSimId(simId);
@@ -471,7 +491,7 @@ export default function App() {
 
   const handleApprovePayload = async () => {
     if (!activeSimId) return;
-
+    setIsApproving(true);
     try {
       const response = await apiCall(`/api/v1/hitl/${activeSimId}/approve`, {
         method: 'POST',
@@ -481,36 +501,107 @@ export default function App() {
       if (response.ok) {
         setHitlPayload('');
         // Instantly query status
-        pollSimulationStatus();
+        await pollSimulationStatus();
       } else {
         const err = await response.json();
         alert(`Error resuming simulation: ${err.detail || 'Unknown error'}`);
       }
     } catch (error) {
       console.error("Error approving payload:", error);
+    } finally {
+      setIsApproving(false);
     }
   };
 
-  const handleRejectPayload = () => {
+  const handleRejectPayload = async () => {
     if (!activeSimId) return;
 
     if (confirm("Rejecting will stop the current campaign. Are you sure?")) {
-      let savedIds = [];
       try {
-        savedIds = JSON.parse(localStorage.getItem('sentinai_sims') || '[]');
-      } catch (e) {}
-      savedIds = savedIds.filter(id => id !== activeSimId);
-      localStorage.setItem('sentinai_sims', JSON.stringify(savedIds));
+        const response = await apiCall(`/api/v1/simulation/${activeSimId}`, {
+          method: 'DELETE'
+        });
+        if (response.ok) {
+          setActiveSimId(null);
+          setActiveSim(null);
+          await loadSimulationsList();
+        } else {
+          const err = await response.json();
+          alert(`Error stopping campaign: ${err.detail || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error("Error stopping campaign:", error);
+      }
+    }
+  };
 
-      setActiveSimId(null);
-      setActiveSim(null);
-      loadSimulationsList();
+  const handleRenameSimulation = async (simId, newName) => {
+    try {
+      const response = await apiCall(`/api/v1/simulation/${simId}/rename`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: newName })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLocalSimsList(prev => prev.map(s => s.simulation_id === simId ? { ...s, name: data.name } : s));
+        if (activeSim && activeSim.simulation_id === simId) {
+          setActiveSim(prev => ({ ...prev, name: data.name }));
+        }
+        setIsRenaming(false);
+      } else {
+        const err = await response.json();
+        alert(err.detail || "Error renaming simulation");
+      }
+    } catch (error) {
+      console.error("Error renaming simulation:", error);
+    }
+  };
+
+  const handleDeleteSimulation = async (simId) => {
+    if (!confirm("Are you sure you want to permanently delete this simulation run?")) return;
+    try {
+      const response = await apiCall(`/api/v1/simulation/${simId}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        if (activeSimId === simId) {
+          setActiveSimId(null);
+          setActiveSim(null);
+        }
+        await loadSimulationsList();
+      } else {
+        const err = await response.json();
+        alert(err.detail || "Error deleting simulation");
+      }
+    } catch (error) {
+      console.error("Error deleting simulation:", error);
     }
   };
 
 
 
   // --- USE EFFECTS ---
+  useEffect(() => {
+    const styleId = "sentinai-inline-animation";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.innerHTML = `
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHealthStatus();
+    const interval = setInterval(fetchHealthStatus, 10000);
+    return () => clearInterval(interval);
+  }, [fetchHealthStatus]);
+
   useEffect(() => {
     if (token) {
       fetchTargets();
@@ -871,6 +962,10 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <div className="status-indicator" style={{ marginBottom: '10px' }}>
+            <span className="pulse-dot" style={{ backgroundColor: '#3b82f6', boxShadow: '0 0 8px #3b82f6' }}></span>
+            <span>Active Operators: {activeSessions}</span>
+          </div>
           <div className="user-profile-info" style={{ display: 'flex' }}>
             <div className="user-avatar">{username.charAt(0).toUpperCase()}</div>
             <div className="user-details">
@@ -957,6 +1052,16 @@ export default function App() {
                   <h3>Launch New Simulation</h3>
                   <form onSubmit={handleLaunchSimulation}>
                     <div className="form-group">
+                      <label htmlFor="sim-name">Simulation Name (Optional)</label>
+                      <input 
+                        type="text" 
+                        id="sim-name" 
+                        value={simName}
+                        onChange={(e) => setSimName(e.target.value)}
+                        placeholder="e.g. Custom Run A" 
+                      />
+                    </div>
+                    <div className="form-group">
                       <label htmlFor="sim-objective">Attack Objective</label>
                       <textarea 
                         id="sim-objective" 
@@ -1026,7 +1131,7 @@ export default function App() {
                             onClick={() => handleSelectSimulation(sim.simulation_id)}
                           >
                             <div className="sim-info">
-                              <span className="sim-info-id">{sim.simulation_id}</span>
+                              <span className="sim-info-id">{sim.name || sim.simulation_id}</span>
                               <span className="sim-info-obj" title={sim.objective}>{sim.objective}</span>
                             </div>
                             <span className={`status-badge ${
@@ -1048,9 +1153,90 @@ export default function App() {
                 {activeSim ? (
                   <div className="glass-card detail-card" style={{ display: 'flex' }}>
                     <div className="detail-header">
-                      <div>
-                        <span className="sim-badge">{activeSim.simulation_id}</span>
-                        <h3>{activeSim.objective}</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="sim-badge">{activeSim.simulation_id}</span>
+                          
+                          {isRenaming ? (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <input 
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '14px',
+                                  borderRadius: '4px',
+                                  border: '1px solid rgba(255,255,255,0.2)',
+                                  backgroundColor: 'rgba(0,0,0,0.4)',
+                                  color: '#fff',
+                                  outline: 'none'
+                                }}
+                                autoFocus
+                              />
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                style={{ padding: '2px 8px', fontSize: '12px' }}
+                                onClick={() => handleRenameSimulation(activeSim.simulation_id, editName)}
+                              >
+                                Save
+                              </button>
+                              <button 
+                                className="btn btn-sm btn-secondary"
+                                style={{ padding: '2px 8px', fontSize: '12px' }}
+                                onClick={() => setIsRenaming(false)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>
+                                {activeSim.name || 'Unnamed Simulation'}
+                              </h3>
+                              
+                              {(role === 'admin' || (activeSim.username && activeSim.username.toLowerCase() === username.toLowerCase())) && (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button 
+                                    onClick={() => {
+                                      setIsRenaming(true);
+                                      setEditName(activeSim.name || '');
+                                    }}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: '#3b82f6',
+                                      cursor: 'pointer',
+                                      padding: '2px',
+                                      fontSize: '14px'
+                                    }}
+                                    title="Rename Simulation"
+                                  >
+                                    ✏️
+                                  </button>
+                                  
+                                  <button 
+                                    onClick={() => handleDeleteSimulation(activeSim.simulation_id)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: '#ef4444',
+                                      cursor: 'pointer',
+                                      padding: '2px',
+                                      fontSize: '14px'
+                                    }}
+                                    title="Delete Simulation"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>
+                          <strong>Objective:</strong> {activeSim.objective}
+                        </p>
                       </div>
                       <span className={`status-badge ${
                         activeSim.status === 'completed' ? 'completed' :
@@ -1246,9 +1432,30 @@ export default function App() {
                                 rows={5}
                               />
                             </div>
-                            <div className="control-actions">
-                              <button className="btn btn-primary" onClick={handleApprovePayload}>Approve & Fire Payload</button>
-                              <button className="btn btn-secondary" onClick={handleRejectPayload}>Skip/Mutate</button>
+                            <div className="control-actions" style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                                <button 
+                                  className="btn btn-primary" 
+                                  onClick={handleApprovePayload} 
+                                  disabled={isApproving}
+                                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                >
+                                  {isApproving && <div className="loader-spinner-inline" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>}
+                                  <span>{isApproving ? "Processing & Firing..." : "Approve & Fire Payload"}</span>
+                                </button>
+                                <button 
+                                  className="btn btn-secondary" 
+                                  onClick={handleRejectPayload} 
+                                  disabled={isApproving}
+                                >
+                                  Skip/Mutate
+                                </button>
+                              </div>
+                              {isApproving && (
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center', fontStyle: 'italic' }}>
+                                  🚀 Orchestrating backend agents & testing target guardrails (this may take 20-30 seconds)...
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1544,11 +1751,25 @@ export default function App() {
                 ) : (
                   exploitsList.map(exploit => (
                     <div key={exploit.id} className="memory-item">
-                      <div className="memory-item-header">
-                        <span className="memory-item-id">{exploit.id}</span>
-                        <span className="type-tag mock" style={{ fontSize: '8px' }}>
-                          {exploit.metadata?.attack_type || 'Prompt Injection'}
-                        </span>
+                      <div className="memory-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span className="memory-item-id">{exploit.id}</span>
+                          <span className="type-tag mock" style={{ fontSize: '8px' }}>
+                            {exploit.metadata?.attack_type || 'Prompt Injection'}
+                          </span>
+                          {exploit.metadata?.username && (
+                            <span style={{ fontSize: '9px', opacity: 0.6 }}>by {exploit.metadata.username}</span>
+                          )}
+                        </div>
+                        {(role === 'admin' || (exploit.metadata?.username && exploit.metadata.username.toLowerCase() === username.toLowerCase())) && (
+                          <button 
+                            onClick={() => handleDeleteExploit(exploit.id)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px', padding: 0 }}
+                            title="Delete Exploit Vector"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </div>
                       <div className="memory-item-prompt">{exploit.prompt}</div>
                     </div>

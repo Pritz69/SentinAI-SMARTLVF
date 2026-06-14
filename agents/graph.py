@@ -28,7 +28,23 @@ async def memorize_success_node(state: SimulationState) -> dict:
     payload to the ChromaDB Long-Term Epistemic Memory for future runs.
     """
     if state["current_payload"]:
-        await memory_manager.store_successful_attack(state["current_payload"])
+        payload = state["current_payload"]
+        if state.get("username"):
+            # AdversarialPayload is frozen, reconstruct it with username metadata
+            meta = dict(payload.metadata) if payload.metadata else {}
+            meta["username"] = state["username"]
+            
+            from schemas.payload import AdversarialPayload
+            updated_payload = AdversarialPayload(
+                payload_id=payload.payload_id,
+                raw_prompt=payload.raw_prompt,
+                attack_vector_type=payload.attack_vector_type,
+                obfuscation_applied=payload.obfuscation_applied,
+                metadata=meta
+            )
+            await memory_manager.store_successful_attack(updated_payload)
+        else:
+            await memory_manager.store_successful_attack(payload)
         
     print(f"\n[MEMORY] Simulation succeeded! Target was compromised.")
     print(f"         Stored successful exploit prompt in ChromaDB long-term memory.\n")

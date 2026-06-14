@@ -88,12 +88,33 @@ async def login(schema: LoginSchema):
     }
     access_token = create_access_token(data=token_data)
     
+    # Save session in Redis
+    from config.settings import settings
+    from core.redis import save_session
+    await save_session(
+        token=access_token,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        expire_minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    
     return TokenSchema(
         access_token=access_token,
         token_type="bearer",
         role=user["role"],
         username=user["username"]
     )
+
+from core.auth import oauth2_scheme
+
+@router.post("/logout")
+async def logout(token: str = Depends(oauth2_scheme)):
+    """Log out the current user, invalidating the session in Redis."""
+    if token:
+        from core.redis import delete_session
+        await delete_session(token)
+    return {"message": "Successfully logged out"}
 
 @router.get("/me", response_model=UserProfileSchema)
 async def get_my_profile(current_user: UserSession = Depends(get_current_user)):

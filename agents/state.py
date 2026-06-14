@@ -26,5 +26,8 @@ class SimulationState(TypedDict):
     target_response: Optional[MCPTargetResponse]
     evaluation: Optional[RiskEvaluation]
     
+    # Ownership
+    username: Optional[str]
+
     # Cyclical History
     history: Annotated[List[str], operator.add]

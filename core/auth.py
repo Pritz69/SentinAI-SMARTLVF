@@ -66,9 +66,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserSession:
     if payload is None:
         raise credentials_exception
     
-    username: str = payload.get("sub")
-    role: str = payload.get("role")
-    user_id: str = payload.get("user_id")
+    # Verify user session is active in Redis
+    from core.redis import get_session
+    session_data = await get_session(token)
+    if session_data is None:
+        raise credentials_exception
+        
+    username: str = session_data.get("username")
+    role: str = session_data.get("role")
+    user_id: str = session_data.get("id")
     
     if username is None or role is None or user_id is None:
         raise credentials_exception

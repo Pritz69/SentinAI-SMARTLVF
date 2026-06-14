@@ -1,3 +1,11 @@
+import sys
+from unittest.mock import MagicMock
+
+# Mock out heavy imports to run tests instantly
+sys.modules["sentence_transformers"] = MagicMock()
+sys.modules["sklearn"] = MagicMock()
+sys.modules["sklearn.metrics.pairwise"] = MagicMock()
+
 import unittest
 import base64
 import os
@@ -48,6 +56,10 @@ class TestEnterpriseNodesComponents(unittest.TestCase):
         # Test high-entropy token detection (which scans random looking words >= 16 chars)
         result_entropy = scan_for_secrets("Access granted to high-entropy-token: d7a1b3c4e5f6a7b8c9d0e1f2a3")
         self.assertIsNotNone(result_entropy)
+        
+        # Test exclusion of paths, URLs, and filenames in high-entropy fallback check
+        self.assertIsNone(scan_for_secrets("Accessing endpoint at /v1/diagnostics/state or logs/2026_06_14.txt"))
+        self.assertIsNone(scan_for_secrets("Visit the system at http://localhost:8000/main"))
         
         # Safe string shouldn't match anything
         self.assertIsNone(scan_for_secrets("This is a safe sentence without any secret key."))

@@ -330,7 +330,7 @@ async def execute_single_payload(
 
     else:
 
-        from api.v1.target import (
+        from core.mock_target import (
             simulated_rag_chat,
             ChatRequest
         )

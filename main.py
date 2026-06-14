@@ -48,7 +48,10 @@ app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets
 @app.get("/")
 @app.get("/dashboard")
 async def serve_dashboard():
-    return FileResponse("frontend/dist/index.html")
+    return FileResponse(
+        "frontend/dist/index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 @app.get("/favicon.svg")
 async def serve_favicon():
@@ -60,8 +63,26 @@ async def serve_icons():
 
 @app.get("/health", response_model=HealthResponse, tags=["Diagnostics"])
 async def health_check():
+    from core.redis import redis_client
+    redis_connected = False
+    site_visits = 0
+    active_sessions = 0
+    try:
+        redis_connected = await redis_client.ping()
+        if redis_connected:
+            visits_str = await redis_client.get("site_visits")
+            site_visits = int(visits_str) if visits_str else 0
+            
+            session_keys = await redis_client.keys("session:*")
+            active_sessions = len(session_keys)
+    except Exception:
+        pass
+
     return HealthResponse(
         status="ok",
         project=settings.PROJECT_NAME,
-        environment=settings.ENV
+        environment=settings.ENV,
+        redis_connected=redis_connected,
+        active_sessions=active_sessions,
+        site_visits=site_visits
     )

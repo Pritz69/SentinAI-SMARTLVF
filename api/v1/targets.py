@@ -75,11 +75,49 @@ async def get_all_exploits(current_user: UserSession = Depends(get_current_user)
         formatted = []
         if data and data.get('ids'):
             for i in range(len(data['ids'])):
+                metadata = data['metadatas'][i] if data['metadatas'] else {}
+                # If the user is not an admin, filter exploits by username
+                if current_user.role != "admin":
+                    meta_user = metadata.get("username")
+                    if not meta_user or meta_user.lower() != current_user.username.lower():
+                        continue
                 formatted.append({
                     "id": data['ids'][i],
                     "prompt": data['documents'][i],
-                    "metadata": data['metadatas'][i] if data['metadatas'] else {}
+                    "metadata": metadata
                 })
         return formatted
     except Exception as e:
         return [{"id": "error", "prompt": f"Could not retrieve memories: {str(e)}", "metadata": {}}]
+
+@router.delete("/memory/exploits/{exploit_id}")
+async def delete_exploit(exploit_id: str, current_user: UserSession = Depends(get_current_user)):
+    """Delete a saved successful exploit vector from ChromaDB."""
+    from agents.memory import memory_manager
+    try:
+        # 1. Fetch the exploit vector metadata to check ownership
+        def _get_item():
+            return memory_manager.repo.collection.get(ids=[exploit_id])
+        item = await asyncio.to_thread(_get_item)
+        
+        if not item or not item.get("ids") or len(item["ids"]) == 0:
+            raise HTTPException(status_code=404, detail="Exploit vector not found.")
+            
+        metadata = item["metadatas"][0] if item.get("metadatas") else {}
+        
+        # 2. Check permissions: normal user can only delete their own vector
+        if current_user.role != "admin":
+            meta_user = metadata.get("username")
+            if not meta_user or meta_user.lower() != current_user.username.lower():
+                raise HTTPException(status_code=403, detail="Not authorized to delete this exploit vector.")
+                
+        # 3. Perform delete
+        def _delete_item():
+            memory_manager.repo.collection.delete(ids=[exploit_id])
+        await asyncio.to_thread(_delete_item)
+        
+        return {"message": "Exploit vector deleted successfully.", "id": exploit_id}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete exploit vector: {str(e)}")

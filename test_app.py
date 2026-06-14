@@ -3,6 +3,13 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
+# Mock heavy packages before importing anything else
+import sys
+from unittest.mock import MagicMock
+sys.modules["sentence_transformers"] = MagicMock()
+sys.modules["sklearn"] = MagicMock()
+sys.modules["sklearn.metrics.pairwise"] = MagicMock()
+
 # Mock the environment keys before importing app
 import os
 os.environ["GROQ_API_KEY"] = "mock_groq_key"

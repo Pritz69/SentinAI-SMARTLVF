@@ -71,25 +71,11 @@ async def approve_and_resume(
             )
 
     # 2. Resume graph execution
-    if settings.USE_CELERY:
-        from tasks.simulation_worker import resume_simulation_task
-        # Trigger Celery background worker task to resume the graph execution
-        resume_simulation_task.delay(simulation_id)
-        return {
-            "simulation_id": simulation_id,
-            "status": "resumed",
-            "message": "Payload approved. Graph execution resumed in Celery background worker."
-        }
-    else:
-        # Wrapper to run the async graph continuation in the background
-        async def _resume_graph():
-            # Passing 'None' to ainvoke resumes the graph from the exact point it was interrupted using the checkpointer state
-            await sentinai_graph.ainvoke(None, config)
-            
-        background_tasks.add_task(_resume_graph)
-        
-        return {
-            "simulation_id": simulation_id,
-            "status": "resumed",
-            "message": "Payload approved. Graph execution resumed in background."
-        }
+    from tasks.simulation_worker import resume_simulation_task
+    # Trigger Celery background worker task to resume the graph execution
+    resume_simulation_task.delay(simulation_id)
+    return {
+        "simulation_id": simulation_id,
+        "status": "resumed",
+        "message": "Payload approved. Graph execution resumed in Celery background worker."
+    }

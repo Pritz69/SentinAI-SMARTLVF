@@ -3,10 +3,34 @@ import os
 import sqlite3
 from fastapi.testclient import TestClient
 
+import sys
+from unittest.mock import MagicMock
+
+# Mock out heavy imports to run tests instantly
+sys.modules["sentence_transformers"] = MagicMock()
+sys.modules["sklearn"] = MagicMock()
+sys.modules["sklearn.metrics.pairwise"] = MagicMock()
+
 # Mock environment keys before importing app
 os.environ["GROQ_API_KEY"] = "mock_groq_key"
 os.environ["GOOGLE_API_KEY"] = "mock_google_key"
 os.environ["SQLITE_DB_PATH"] = "test_state.db"
+
+from unittest.mock import patch
+
+class MockChromaVectorRepository:
+    def __init__(self, *args, **kwargs):
+        pass
+    async def initialize(self):
+        pass
+    async def add_exploit_vector(self, *args, **kwargs):
+        pass
+    async def query_similar_exploits(self, *args, **kwargs):
+        return []
+
+# Setup class patcher for ChromaDB
+patcher_chroma = patch("database.chroma_repo.ChromaVectorRepository", MockChromaVectorRepository)
+patcher_chroma.start()
 
 from main import app
 from database.sqlite_user_repo import user_repo

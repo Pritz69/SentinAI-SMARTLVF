@@ -1,3 +1,14 @@
+# Force redis-py to use RESP2 protocol to avoid 'unknown command HELLO' error on older Redis versions
+try:
+    import redis.connection
+    import redis.utils
+    import redis.asyncio.connection
+    redis.connection.DEFAULT_RESP_VERSION = 2
+    redis.utils.DEFAULT_RESP_VERSION = 2
+    redis.asyncio.connection.DEFAULT_RESP_VERSION = 2
+except ImportError:
+    pass
+
 import os
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,7 +19,7 @@ class Settings(BaseSettings):
     )
 
     # Environment
-    ENV: Literal["development", "production"] = "development"
+    ENV: Literal["development", "production", "test"] = "development"
     PROJECT_NAME: str = "SentinAI-SMARTLVF"
     
     # API Keys
@@ -22,7 +33,6 @@ class Settings(BaseSettings):
     # Production Infrastructure Swaps
     POSTGRES_DSN: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinai"
     REDIS_URL: str = "redis://localhost:6379/0"
-    USE_CELERY: bool = False
 
     # Rate Limiting Parameters
     RATE_LIMIT_TOKENS: int = 100
